@@ -18,6 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with: {fetch-depth: 0}   # 爆炸半径的三点 diff 需要 merge-base，浅克隆会 exit 128
 
       # ---- Stage 2：PR-Agent 高召回初审（自动 /review + /improve，配置见 .pr_agent.toml）----
       - name: PR-Agent 初审
