@@ -84,8 +84,14 @@ def fetch_pr_comments(pr_url):
     return texts
 
 
+# PR-Agent 原生 review 的折叠块（模型不守 [AI-FINDING] 契约时的兜底）
+NATIVE_RE = re.compile(
+    r"<details><summary><a href='([^']+)'>(?:<strong>)?([^<]+?)(?:</strong>)?</a>(.*?)</details>",
+    re.S)
+
+
 def parse_findings_from_comments(comments):
-    """从 bot 评论中解析 [AI-FINDING] 结构块（.pr_agent.toml 强制的格式）。"""
+    """从 bot 评论解析发现：优先 [AI-FINDING] 契约块，无则兜底解析 PR-Agent 原生格式。"""
     findings, seq = [], 1
     for author, body in comments:
         for sev, conf, path, line, title, evidence, fix in FINDING_RE.findall(body):
@@ -95,6 +101,21 @@ def parse_findings_from_comments(comments):
                 "file": path, "line": int(line),
                 "title": title.strip(), "evidence": evidence.strip(),
                 "fix": fix.strip(), "source": author,
+            })
+            seq += 1
+    if findings:
+        return findings  # 契约格式存在时优先（结构化信息更全）
+    for author, body in comments:
+        if "pr-agent:review" not in body:
+            continue
+        for link, title, inner in NATIVE_RE.findall(body):
+            desc = re.sub(r"```[\w]*\n.*?```", "", inner, flags=re.S).strip(" \n-")
+            title = re.sub("<[^>]+>", "", title).strip()
+            findings.append({
+                "id": f"S{seq}", "severity": "medium", "confidence": 0.6,
+                "file": "", "line": 0,
+                "title": title, "evidence": f"{desc[:500]}（原文: {link}）",
+                "fix": desc[:200], "source": f"{author}/native",
             })
             seq += 1
     return findings
