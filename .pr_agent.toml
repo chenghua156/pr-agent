@@ -1,27 +1,46 @@
-# NOTE: This file is consumed by Qodo's "free for open source" agent
-# (the `qodo-free-for-open-source-projects` bot) — a separate, hosted, closed-source
-# service. It is NOT read by the open-source pr-agent in this repository; some keys
-# below (e.g. the [review_agent] section) only exist in that hosted agent.
+# PR-Agent 配置（Stage 2 高召回初审）——放在目标仓库根目录
+# 已逐键对照 pr-agent v0.43.0 源码 settings/configuration.toml 核实（2026-08-31）
+# 关键点：初审只管"多报"，噪音由 Stage 3 分诊层消化；风格类问题已被 Stage 1 lint 消灭
+
+[config]
+# 大仓标准配置（几十万行代码库），小仓可降到 32000（v0.43 默认即 32000）
+max_model_tokens = 128000
+# 模型经 LiteLLM 路由（v0.43 默认 gpt-5.6，按需改 deepseek-chat / glm 等）
+# model = "deepseek-chat"
+# 豁免通道：带这些标签的 PR 跳过 AI 审查（走 Stage 1 + 抽样）——注意是 [config] 段、复数、数组
+ignore_pr_labels = ["bulk-change", "skip-ai-review"]
+temperature = 0.2
 
 [pr_reviewer]
-enable_review_labels_effort = true
-enable_auto_approval = true
+# ---- 以下键名已对照 v0.43.0 源码核实 ----
+require_tests_review = true          # 输出"建议补充的测试"清单（喂给 Stage 5 测试兜底）
+require_security_review = true       # 安全检查清单
+require_can_be_split_review = true   # 大 PR 拆分建议（配合我们 Stage 0 的 400 行门禁）
+persistent_comment = true            # ← 注意：单数（v0.43 键名），评论追加而非每次新发
+enable_intro_text = false
+enable_help_text = false
+num_max_findings = 8                 # ← 高召回关键：v0.43 默认 3，初审放大到 8，分诊层负责裁剪
+extra_instructions = """\
+你是高召回代码审查器（Stage 2/6）。只报告：缺陷、安全漏洞、逻辑错误、并发问题、\
+资源泄漏、边界条件、性能退化。禁止评论：命名、格式、风格、个人偏好。\
+与 lint/类型检查重复的问题一律跳过。
 
-[github_app]
-pr_commands = [
-    "/describe --pr_description.publish_description_as_comment=true",
-    "/improve",
-    "/agentic_review"
-]
+每条发现必须严格使用以下机器可解析格式（供 Stage 3 分诊程序解析，格式错误视为无效输出）：
+[AI-FINDING] severity=critical confidence=0.9 file=src/foo.py:42
+title: 一句话问题标题
+evidence: 具体代码路径与调用链证据（必须真实存在于本 diff 或仓库中）
+fix: 具体修复建议
 
-handle_push_trigger = true
-push_commands = [
-    "/improve",
-    "/agentic_review"
-]
+severity 标准：critical=安全漏洞/数据损坏/崩溃/资金风险；medium=逻辑缺陷/并发/泄漏/性能退化；low=其余真实问题。\
+宁可多报，由下游分诊。confidence 为你对"证据真实存在"的把握，不是对风格的把握。"""
 
-[review_agent]
-enabled = true
-publish_output = true
-demand_self_review = true
-approve_pr_on_self_review = true
+[pr_code_suggestions]
+# ---- 以下键名已对照 v0.43.0 源码核实 ----
+num_code_suggestions_per_chunk = 6  # ← v0.43 键名（旧版叫 num_code_suggestions）
+commitable_code_suggestions = true   # 建议可直接 commit，作者自助闭环
+persistent_comment = true            # ← 单数
+extra_instructions = "只提出改变行为的建议，不提风格重构。每条标注 confidence。禁止与 lint 规则重复。"
+
+[pr_description]
+publish_labels = true
+# 注：v0.43 中"保留用户原始描述"的键是 add_original_user_description（默认已 true），无需设置

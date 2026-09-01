@@ -1,0 +1,82 @@
+# Stage 2 + 3 + 4：AI 初审 -> 分诊降噪 -> 分级动作
+# 复制到目标仓库 .github/workflows/ai-review.yml
+# 前置：仓库 secrets 配置 TRIAGE_API_KEY（分诊模型密钥）；.pr_agent.toml 已在仓库根
+name: ai-review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  # 分诊依赖初审评论已存在；synchronize 触发时 PR-Agent Action 先跑，本 job 读取其评论
+
+permissions:
+  contents: read
+  pull-requests: write
+  statuses: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---- Stage 2：PR-Agent 高召回初审（自动 /review + /improve，配置见 .pr_agent.toml）----
+      - name: PR-Agent 初审
+        uses: qodo-actions/pr-agent@main
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true   # 初审失败不阻断（分诊层会给出空结果兜底）
+
+      - name: 等待初审评论落盘
+        run: sleep 60
+
+      # ---- Stage 3：分诊降噪（从 bot 评论解析 [AI-FINDING]，LLM 蒸馏）----
+      # 分诊后端由 config/pipeline.json 的 models.triage_backend 决定：
+      #   "openai"（CI 推荐，需 TRIAGE_API_KEY） | "dsh"（本地/MCP 路径，复用 DSH 已配置模型）
+      - name: 分诊
+        env:
+          TRIAGE_API_KEY: ${{ secrets.TRIAGE_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # CI 环境无 dsh / 无 TRIAGE_API_KEY 时自动降级为规则分诊（dry-run）
+          EXTRA=""
+          if [ -z "$TRIAGE_API_KEY" ]; then EXTRA="--dry-run"; fi
+          python3 scripts/triage.py \
+            --pr "${{ github.event.pull_request.html_url }}" \
+            --ledger config/noise_ledger.json \
+            --config config/pipeline.json \
+            --out triaged.json $EXTRA
+
+      # ---- Q3 爆炸半径检测（输出 escalate 信号，供人工/后续步骤决定升级）----
+      - name: 爆炸半径检测
+        run: |
+          git fetch origin ${{ github.base_ref }} --depth=1
+          git diff origin/${{ github.base_ref }}...HEAD > pr.diff
+          python3 scripts/blast_radius.py --diff pr.diff --repo . \
+            --config config/pipeline.json > blast_radius.json || true
+          cat blast_radius.json
+
+      # ---- Stage 4：分级动作（critical -> status failure 阻断；其余蒸馏评论）----
+      - name: 分级动作
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 scripts/post_review.py \
+            --triaged triaged.json \
+            --config config/pipeline.json \
+            --repo "${{ github.repository }}" \
+            --pr "${{ github.event.pull_request.number }}" \
+            --sha "${{ github.event.pull_request.head.sha }}"
+
+  # ---- Stage 5（条件触发）：关键路径对抗深度审查 ----
+  # blast_radius.escalate=true 或打 deep-review 标签时，用 harness agent 跑多 persona 对抗审查。
+  # 参考实现（Claude Code headless）：
+  #   claude -p "$(cat config/adversarial_prompt.txt)" --allowedTools Read,Grep,Bash > adversarial.md
+  # 本模板留作接入点，按团队选用的 harness（Claude Code/OpenCode/dsh）填充。
+  deep-review:
+    if: contains(github.event.pull_request.labels.*.name, 'deep-review')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: 对抗深度审查（占位）
+        run: echo "TODO: 接入所选 harness agent 的 headless 对抗审查（见 README Stage 5）"
