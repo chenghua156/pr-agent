@@ -1,0 +1,71 @@
+# Stage 0 + Stage 1：确定性门禁（零建议噪音层）
+# 复制到目标仓库 .github/workflows/pr-gate.yml
+name: pr-gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  # ---- Stage 0：PR 规模硬门禁（>400 行强制拆分，机械性大改走豁免标签）----
+  # 计数逻辑固化在 scripts/size_gate.py（与 git numstat 对齐），阈值读 config/pipeline.json
+  size-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: 规模门禁
+        env:
+          EXEMPT: ${{ contains(github.event.pull_request.labels.*.name, 'bulk-change') }}
+        run: |
+          git fetch origin ${{ github.base_ref }} --depth=1
+          git diff --numstat origin/${{ github.base_ref }}...HEAD > numstat.txt
+          python3 scripts/size_gate.py --numstat numstat.txt --config config/pipeline.json \
+            ${EXEMPT:+--label bulk-change} || [ $? = 3 ] && echo "豁免通道继续确定性校验" || exit 1
+
+  # ---- Stage 1a：密钥扫描 ----
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ---- Stage 1b：lint / 类型检查（按语言替换为项目实际命令）----
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: lint 占位（替换为真实命令）
+        run: |
+          echo "示例（python）: pip install ruff && ruff check ."
+          echo "示例（go）: go vet ./... && golangci-lint run"
+          echo "示例（ts）: pnpm exec eslint . --max-warnings=0 && pnpm exec tsc --noEmit"
+          true  # TODO: 替换为真实命令后删除本行
+
+  # ---- Stage 1c：覆盖率 delta 门禁（测试兜底入口）----
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 跑测试并导出 Cobertura（替换为项目真实测试命令）
+        run: |
+          echo "示例（python）: pip install -e . pytest --cov --cov-report=xml:head.xml"
+          echo "示例（java）: mvn test jacoco:report && 转换为 cobertura"
+          true  # TODO: 替换后删除；产出 head.xml
+      - name: 生成基线覆盖率
+        run: |
+          git fetch origin ${{ github.base_ref }} --depth=1
+          git checkout origin/${{ github.base_ref }}
+          echo "TODO: 在基线上跑同一测试命令，产出 base.xml"
+          true
+      - name: 覆盖率 delta 门禁
+        run: |
+          if [ ! -f head.xml ] || [ ! -f base.xml ]; then
+            echo "::notice::覆盖率报告未生成（测试命令为占位）——门禁跳过，接入真实测试命令后自动生效"
+            exit 0
+          fi
+          python3 scripts/coverage_delta.py --base base.xml --head head.xml \
+            --config config/pipeline.json --verbose

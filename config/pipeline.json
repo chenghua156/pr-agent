@@ -1,0 +1,36 @@
+{
+  "$comment": "流水线总配置：阈值、模型、路由。所有脚本共用此文件（ Stage 0/2/3/4/Q3 风险路由 的运行参数）",
+  "models": {
+    "triage_backend": "dsh",
+    "dsh_command": "/home/wangct/.npm/_npx/1e7f6d9597241db0/node_modules/.bin/dsh",
+    "triage_model": "deepseek-chat",
+    "triage_base_url": "https://api.deepseek.com/v1",
+    "_note": "默认 dsh 后端：经 `dsh --profile headless` 复用 DSH 已配置的模型与凭据，无需 TRIAGE_API_KEY。triage_model/triage_base_url 仅在 triage_backend=openai 时生效（那时才需要 TRIAGE_API_KEY）。dsh_command 测试时可指向桩脚本"
+  },
+  "stage0": {
+    "max_diff_lines": 400,
+    "exempt_label": "bulk-change",
+    "_note": "diff 超限默认 fail；打 bulk-change 标签走豁免通道（仅确定性校验+抽样）"
+  },
+  "triage": {
+    "max_findings": 5,
+    "min_confidence": 0.6,
+    "prompt_template": "config/triage_prompt.txt"
+  },
+  "actions": {
+    "block_on": ["critical"],
+    "commit_status_context": "ai-review/triage",
+    "_note": "初期只 block critical；critical 精度台账验证 >90% 后再收紧"
+  },
+  "blast_radius": {
+    "_note": "critical_globs 相对仓库根目录（如 services/payment/**），按实际项目结构调整",
+    "caller_threshold": 20,
+    "critical_globs": ["auth/**", "payment/**", "core/scheduler/**", "crypto/**"],
+    "escalate_on_critical_path": true
+  },
+  "coverage": {
+    "new_code_min_pct": 80,
+    "allow_decrease": false,
+    "_note": "总覆盖率不得下降；新增代码 >=80%（Stage 1 门禁）"
+  }
+}
