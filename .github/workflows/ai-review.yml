@@ -21,7 +21,7 @@ jobs:
 
       # ---- Stage 2：PR-Agent 高召回初审（自动 /review + /improve，配置见 .pr_agent.toml）----
       - name: PR-Agent 初审
-        uses: Codium-ai/pr-agent@master
+        uses: Codium-ai/pr-agent@e13da4fdda9903c8c7d1c9ba22f671b43f56039b  # main
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true   # 初审失败不阻断（分诊层会给出空结果兜底）
