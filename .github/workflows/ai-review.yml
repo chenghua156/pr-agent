@@ -21,10 +21,14 @@ jobs:
         with: {fetch-depth: 0}   # 爆炸半径的三点 diff 需要 merge-base，浅克隆会 exit 128
 
       # ---- Stage 2：PR-Agent 高召回初审（自动 /review + /improve，配置见 .pr_agent.toml）----
-      - name: PR-Agent 初审
+      - name: PR-Agent 初审（MiniMax-M2.5，OpenAI 兼容通道）
         uses: Codium-ai/pr-agent@e13da4fdda9903c8c7d1c9ba22f671b43f56039b  # main
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          config.model: "openai/MiniMax-M2.5"
+          openai.key: ${{ secrets.MINIMAX_KEY }}
+          openai.api_base: "https://api.minimaxi.com/v1"
+          config.custom_model_max_tokens: "16000"
         continue-on-error: true   # 初审失败不阻断（分诊层会给出空结果兜底）
 
       - name: 等待初审评论落盘
