@@ -34,10 +34,13 @@ jobs:
           GITHUB_ACTION_CONFIG.AUTO_REVIEW: "true"
           GITHUB_ACTION_CONFIG.AUTO_DESCRIBE: "false"
           GITHUB_ACTION_CONFIG.AUTO_IMPROVE: "false"
+          # synchronize（新推送）默认不跑命令，显式开启并只跑 /review
+          GITHUB_ACTION_CONFIG.HANDLE_PUSH_TRIGGER: "true"
+          GITHUB_ACTION_CONFIG.PUSH_COMMANDS: '["/review"]'
         continue-on-error: true   # 初审失败不阻断（分诊层会给出空结果兜底）
 
       - name: 等待初审评论落盘
-        run: sleep 60
+        run: sleep 150   # MiniMax 推理 2-3 分钟，等 review 评论发出后再分诊
 
       # ---- Stage 3：分诊降噪（从 bot 评论解析 [AI-FINDING]，LLM 蒸馏）----
       # 分诊后端由 config/pipeline.json 的 models.triage_backend 决定：
