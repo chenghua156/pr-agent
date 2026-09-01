@@ -79,4 +79,5 @@ jobs:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}
       - name: 对抗深度审查（占位）
-        run: echo "TODO: 接入所选 harness agent 的 headless 对抗审查（见 README Stage 5）"
+        run: |
+          echo "TODO: 接入所选 harness agent 的 headless 对抗审查（见 README Stage 5）"
