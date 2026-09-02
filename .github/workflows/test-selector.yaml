@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # 语言开关：手动输入 > 仓库变量 PR_LANG > 默认 en
-      PR_LANG: ${{ inputs.lang || vars.PR_LANG || 'zh' }}  # 本分支演示中文（正式默认 en）
+      PR_LANG: ${{ inputs.lang || vars.PR_LANG || 'en' }}
     steps:
       - uses: actions/checkout@v4
         with:
