@@ -8,9 +8,11 @@ Stage 4 分级动作 —— Cloudflare 模式：干净放行、critical 阻断�
   - 其余 → commit status = success + 一条蒸馏后的 PR 评论
   - 评论内嵌 👍/👎 提示，反馈经 noise_ledger.py vote 沉淀（Stage 6 闭环）
 
+语言：所有对外文案经 pr_lang.py（--lang / PR_LANG，默认 en；zh 切中文）
+
 用法：
-  GH 环境:  python3 post_review.py --triaged triaged.json --repo owner/name --pr 123 --sha <sha>
-  本地:     python3 post_review.py --triaged triaged.json --dry-run
+  GH 环境:  python3 post_review.py --triaged triaged.json --repo owner/name --pr 123 --sha <sha> [--lang zh]
+  本地:     python3 post_review.py --triaged triaged.json --dry-run [--lang zh]
 依赖：仅标准库；gh 模式需要 gh CLI + GH_TOKEN/GITHUB_TOKEN
 """
 import argparse
@@ -19,43 +21,44 @@ import os
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from pr_lang import resolve_lang, t  # noqa: E402
+
 EMOJI = {"critical": "🔴", "medium": "🟡", "low": "🟢"}
 
 
-def render_comment(triaged):
-    """蒸馏后的 PR 评论（人眼可见的全部内容就这些）。"""
-    lines = ["## 🤖 AI 审查（分诊后）", "", f"> {triaged.get('summary', '')}", ""]
+def render_comment(triaged, lang):
+    """蒸馏后的 PR 评论（人眼可见的全部内容就这些）；文案语言由 lang 决定。"""
+    lines = [t("comment.title", lang), "", f"> {triaged.get('summary', '')}", ""]
     findings = triaged.get("findings", [])
     if not findings:
-        lines.append("✅ **AI: no blocking findings** —— 未发现阻断性问题，请 reviewer 关注设计与业务正确性。")
+        lines.append(t("comment.no_findings", lang))
     for f in findings:
         sev = f.get("severity", "low")
         lines += [
             f"{EMOJI.get(sev, '🟢')} **[{sev.upper()}] {f.get('title', '')}**（confidence {f.get('confidence', '?')}）",
-            f"- 位置：`{f.get('file', '?')}:{f.get('line', '?')}`",
-            f"- 证据：{f.get('evidence', '—')}",
-            f"- 建议：{f.get('fix', '—')}",
+            t("comment.location", lang, file=f.get("file", "?"), line=f.get("line", "?")),
+            t("comment.evidence", lang, evidence=f.get("evidence", "—")),
+            t("comment.suggestion", lang, fix=f.get("fix", "—")),
             "",
         ]
     archived = triaged.get("archived", [])
     if archived:
-        lines += ["<details>", f"<summary>已归档 {len(archived)} 条（去重/台账/证据不足，可展开核查）</summary>", ""]
+        lines += ["<details>", f"<summary>{t('comment.archived_summary', lang, n=len(archived))}</summary>", ""]
         lines += [f"- {a.get('title', '?')}（{a.get('reason', '?')}）" for a in archived]
         lines += ["", "</details>"]
-    lines += ["---",
-              "*反馈闭环：对以上每条发现，有用点 👍 / 误报点 👎（本条评论的 reactions），"
-              "每周经 `noise_ledger.py add` 沉淀为分诊规则。*"]
+    lines += ["---", t("comment.feedback", lang)]
     return "\n".join(lines)
 
 
-def gh_api(endpoint, payload=None, method=None):
+def gh_api(endpoint, payload=None, method=None, lang=None):
     cmd = ["gh", "api", "-X", method or ("POST" if payload else "GET"), endpoint]
     if payload is not None:
         cmd += ["--input", "-"]
     proc = subprocess.run(cmd, input=json.dumps(payload) if payload is not None else "",
                           capture_output=True, text=True)
     if proc.returncode != 0:
-        print(f"警告：gh api {endpoint} 失败：{proc.stderr.strip()}", file=sys.stderr)
+        print(t("warn.gh_failed", lang, endpoint=endpoint, err=proc.stderr.strip()), file=sys.stderr)
     return proc.returncode == 0
 
 
@@ -68,7 +71,10 @@ def main():
     ap.add_argument("--sha", help="head commit（设置 status 用）")
     ap.add_argument("--dry-run", action="store_true", help="只打印动作与评论，不调 gh")
     ap.add_argument("--report", help="本地模式：把蒸馏报告写入该 markdown 文件")
+    ap.add_argument("--lang", choices=["en", "zh"], help="输出语言（默认 PR_LANG 环境变量/en）")
     args = ap.parse_args()
+
+    lang = resolve_lang(args.lang)
 
     with open(args.triaged, encoding="utf-8") as f:
         triaged = json.load(f)
@@ -79,28 +85,29 @@ def main():
 
     blocking = [f for f in triaged.get("findings", []) if f.get("severity") in block_on]
     state = "failure" if blocking else "success"
-    comment = render_comment(triaged)
+    comment = render_comment(triaged, lang)
 
-    print(f"[actions] 分级结果：{state}（阻断 {len(blocking)} 条 critical）")
+    print(t("console.verdict", lang, state=state, n=len(blocking)))
     if args.report:
         with open(args.report, "w", encoding="utf-8") as f:
             f.write(comment + "\n")
-        print(f"[actions] 报告已写入：{args.report}")
+        print(t("console.report_written", lang, path=args.report))
         return
     if args.dry_run:
-        print("\n----- 将发布的 PR 评论 -----\n" + comment)
+        print(t("console.comment_preview", lang) + comment)
         return
 
     if not (args.repo and args.pr):
-        sys.exit("错误：gh 模式需要 --repo owner/name --pr N [--sha]")
+        sys.exit(t("console.need_repo", lang))
     ctx = "ai-review/triage"
     if args.sha:
         gh_api(f"repos/{args.repo}/statuses/{args.sha}",
                {"state": state, "context": ctx,
-                "description": f"{len(blocking)} blocking / {len(triaged.get('findings', []))} findings"},
-               method="POST")
-    gh_api(f"repos/{args.repo}/issues/{args.pr}/comments", {"body": comment}, method="POST")
-    print(f"[actions] 已发布：status={state} context={ctx}，评论见 PR #{args.pr}")
+                "description": t("status.description", lang,
+                                 blocking=len(blocking), total=len(triaged.get("findings", [])))},
+               method="POST", lang=lang)
+    gh_api(f"repos/{args.repo}/issues/{args.pr}/comments", {"body": comment}, method="POST", lang=lang)
+    print(t("console.published", lang, state=state, ctx=ctx, pr=args.pr))
     if blocking:
         sys.exit(2)  # CI 感知阻断
 

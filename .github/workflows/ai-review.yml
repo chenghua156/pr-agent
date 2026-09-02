@@ -49,6 +49,7 @@ jobs:
         env:
           TRIAGE_API_KEY: ${{ secrets.TRIAGE_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_LANG: zh   # 语言统一：本分支演示中文输出（正式默认 en）
         run: |
           # CI 环境无 dsh / 无 TRIAGE_API_KEY 时自动降级为规则分诊（dry-run）
           EXTRA=""
@@ -72,6 +73,7 @@ jobs:
       - name: 分级动作
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_LANG: zh   # 语言统一：评论与 status 描述随开关
         run: |
           python3 scripts/post_review.py \
             --triaged triaged.json \

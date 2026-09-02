@@ -174,6 +174,16 @@ def llm_triage(findings, ledger, diff_text, cfg):
                  .replace("{NOISE_LEDGER}", ledger_brief or "（空）")
                  .replace("{FINDINGS}", json.dumps(findings, ensure_ascii=False, indent=1))
                  .replace("{DIFF}", (diff_text or "（未提供）")[:60000]))
+    # 语言统一（pr_lang）：AI 产出的 title/evidence/fix/summary 按开关语言输出，默认英文
+    from pr_lang import resolve_lang
+    _lang = resolve_lang()
+    prompt += {
+        "en": "\n\nOUTPUT LANGUAGE REQUIREMENT: write every human-readable field "
+              "(title, evidence, fix, summary) in English. Keep code identifiers, file "
+              "paths and log excerpts as-is; severity/confidence stay enum/numeric.",
+        "zh": "\n\n输出语言要求：title、evidence、fix、summary 等人类可读字段一律用中文书写；"
+              "代码标识符、文件路径、日志摘录保持原样；severity/confidence 保持枚举/数值。",
+    }[_lang]
     backend = cfg["models"].get("triage_backend", "openai")
     if backend == "dsh":
         return {"mode": "dsh", **dsh_triage(prompt, cfg)}
