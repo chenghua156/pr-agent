@@ -1,0 +1,49 @@
+# 变更驱动的测试选型：push/PR 时判定本次改动必测哪些测试类型
+# 产物：testtypes.json（artifact）+ Step Summary 报告
+# 组件来自 pr-review-stack v2.1 的 test-selector（变更影响分析五分类轻量实现）
+name: test-selector
+
+on:
+  push:
+    branches: ['main', 'feature/**', 'feat/**', 'test/**']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  select-test-types:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # 三点 diff 需要 base 分支历史
+
+      - name: 生成 diff（对比 main）
+        run: |
+          git fetch origin main --depth=1
+          git diff origin/main...HEAD > pr.diff
+          echo "diff 行数: $(wc -l < pr.diff)"
+
+      - name: 测试选型（必测类型/风险分级/回归用例选择）
+        run: |
+          if grep -qE '^(\+\+\+|---) ' pr.diff; then
+            python3 test-selector/test_selector.py \
+              --diff pr.diff \
+              --trace test-selector/trace.example.json \
+              --out testtypes.json | tee selector-report.txt
+          else
+            echo "diff 为空（如 push 到 main 自身），跳过选型"
+            echo "## test-selector：diff 为空，跳过" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: 写入 Job Summary
+        run: 'cat selector-report.txt >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true'
+
+      - name: 上传选型产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: testtypes
+          path: |
+            testtypes.json
+            selector-report.txt
+          if-no-files-found: ignore

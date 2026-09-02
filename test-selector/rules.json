@@ -1,0 +1,380 @@
+{
+  "layers": [
+    {
+      "id": "frontend_ui",
+      "globs": [
+        "*.vue",
+        "*.tsx",
+        "*.jsx",
+        "*.svelte",
+        "*.html",
+        "*.css",
+        "*.scss",
+        "*.less"
+      ],
+      "paths": [
+        "src/components/",
+        "ui/",
+        "web/src/",
+        "static/"
+      ],
+      "must": [
+        "ui_functional",
+        "visual_regression",
+        "smoke"
+      ],
+      "conditional": [
+        {
+          "type": "compatibility",
+          "condition": "多浏览器发布矩阵"
+        },
+        {
+          "type": "responsive",
+          "condition": "布局/断点改动"
+        },
+        {
+          "type": "i18n",
+          "condition": "文案或多语言键改动"
+        }
+      ]
+    },
+    {
+      "id": "frontend_logic",
+      "globs": [
+        "*.ts",
+        "*.js"
+      ],
+      "paths": [
+        "store/",
+        "composables/",
+        "hooks/",
+        "src/pages/",
+        "src/api/"
+      ],
+      "must": [
+        "unit",
+        "component",
+        "e2e"
+      ],
+      "conditional": [
+        {
+          "type": "session",
+          "condition": "涉及登录态/Cookie/Token"
+        }
+      ]
+    },
+    {
+      "id": "api_surface",
+      "globs": [],
+      "paths": [
+        "api/",
+        "controller",
+        "routes",
+        "handlers/",
+        "resource",
+        "views.py",
+        "urls.py",
+        "servlet"
+      ],
+      "must": [
+        "contract",
+        "functional",
+        "regression"
+      ],
+      "conditional": [
+        {
+          "type": "version_compat",
+          "condition": "删改了对外字段或参数"
+        },
+        {
+          "type": "consumer_contract",
+          "condition": "有已知下游消费方（Pact）"
+        }
+      ]
+    },
+    {
+      "id": "backend_logic",
+      "globs": [],
+      "paths": [
+        "service",
+        "biz/",
+        "core/",
+        "logic/",
+        "domain/",
+        "modules/"
+      ],
+      "must": [
+        "functional",
+        "integration",
+        "regression"
+      ],
+      "conditional": [
+        {
+          "type": "idempotency",
+          "condition": "订单/资金/重试语义"
+        },
+        {
+          "type": "data_integrity",
+          "condition": "写库或事务"
+        }
+      ]
+    },
+    {
+      "id": "db_schema",
+      "globs": [
+        "*.sql"
+      ],
+      "paths": [
+        "migration",
+        "migrations/",
+        "dao/",
+        "models/"
+      ],
+      "must": [
+        "data_integrity",
+        "integration",
+        "regression"
+      ],
+      "conditional": [
+        {
+          "type": "capacity",
+          "condition": "大表结构变更"
+        },
+        {
+          "type": "performance_load",
+          "condition": "索引或慢查询调整"
+        }
+      ]
+    },
+    {
+      "id": "config",
+      "globs": [
+        "*.yaml",
+        "*.yml",
+        "*.ini",
+        "*.toml",
+        "*.env",
+        "*.conf",
+        "*.cfg"
+      ],
+      "paths": [
+        "config/",
+        "etc/"
+      ],
+      "must": [
+        "smoke",
+        "regression"
+      ],
+      "conditional": [
+        {
+          "type": "performance_spike",
+          "condition": "限流/配额值调整"
+        }
+      ]
+    },
+    {
+      "id": "dependency",
+      "globs": [
+        "package.json",
+        "requirements.txt",
+        "go.mod",
+        "pom.xml",
+        "Cargo.toml",
+        "Makefile"
+      ],
+      "paths": [],
+      "must": [
+        "smoke",
+        "regression"
+      ],
+      "conditional": [
+        {
+          "type": "contract",
+          "condition": "对外 API 面大"
+        }
+      ]
+    },
+    {
+      "id": "test_code",
+      "globs": [
+        "test_*.py",
+        "*_test.go",
+        "*.test.js",
+        "*.spec.ts"
+      ],
+      "paths": [
+        "test",
+        "tests/",
+        "spec/",
+        "__tests__"
+      ],
+      "must": [
+        "unit"
+      ],
+      "conditional": []
+    }
+  ],
+  "sensitivities": [
+    {
+      "id": "hardcoded_secret",
+      "regex": [
+        "(?:sk-[A-Za-z0-9]|AKIA|BEGIN (?:RSA )?PRIVATE KEY)",
+        "(?:password|passwd|pass|pwd|secret|token|api_?key|access_?key)\\s*[=:]\\s*['\\\"][^'\\\"]{8,}"
+      ],
+      "flags": "i",
+      "must": [
+        "security"
+      ],
+      "conditional": []
+    },
+    {
+      "id": "auth_surface",
+      "regex": [
+        "\\b(?:auth|login|logout|password|token|jwt|session|cookie|encrypt|decrypt|hmac|signature|permission|privilege)\\w*\\b"
+      ],
+      "flags": "i",
+      "must": [
+        "security"
+      ],
+      "conditional": [
+        {
+          "type": "fuzz",
+          "condition": "外部输入面大"
+        }
+      ]
+    },
+    {
+      "id": "sql_concat",
+      "regex": [
+        "f['\\\"].*(?:SELECT|INSERT|UPDATE|DELETE|DROP|ALTER)",
+        "execute\\s*\\(\\s*['\\\"~]?(?:SELECT|INSERT|UPDATE|DELETE).*(?:\\+|%s\\s*\\)|\\.format|\\{)"
+      ],
+      "flags": "i",
+      "must": [
+        "security",
+        "fuzz"
+      ],
+      "conditional": []
+    },
+    {
+      "id": "shell_exec",
+      "regex": [
+        "\\bsubprocess\\b|\\bos\\.system\\b|shell\\s*=\\s*True|\\beval\\s*\\(|\\bexec\\s*\\("
+      ],
+      "flags": "",
+      "must": [
+        "security"
+      ],
+      "conditional": []
+    },
+    {
+      "id": "concurrency",
+      "regex": [
+        "\\b(?:Thread|threading|RLock|Mutex|Semaphore|Queue|channel|asyncio|synchronized|atomic)\\b|go\\s+func"
+      ],
+      "flags": "",
+      "must": [
+        "integration",
+        "performance_stress"
+      ],
+      "conditional": [
+        {
+          "type": "performance_spike",
+          "condition": "存在突发流量场景"
+        },
+        {
+          "type": "performance_soak",
+          "condition": "常驻服务"
+        }
+      ]
+    },
+    {
+      "id": "money_tx",
+      "regex": [
+        "\\b(?:charge|payment|refund|order|invoice|balance|transaction|withdraw|deposit|billing)\\w*\\b"
+      ],
+      "flags": "i",
+      "must": [
+        "functional",
+        "idempotency",
+        "data_integrity"
+      ],
+      "conditional": []
+    },
+    {
+      "id": "perf_hotpath",
+      "regex": [
+        "\\bfor\\s+\\w+\\s+in\\b|\\bwhile\\b|\\.query\\(|\\bSELECT\\b.*\\bFROM\\b|\\bcache\\b"
+      ],
+      "flags": "i",
+      "must": [],
+      "conditional": [
+        {
+          "type": "performance_load",
+          "condition": "循环内查询/缓存失效/N+1"
+        }
+      ]
+    },
+    {
+      "id": "resource_leak",
+      "regex": [
+        "(?<!with )\\bopen\\s*\\("
+      ],
+      "flags": "",
+      "must": [],
+      "conditional": [
+        {
+          "type": "performance_soak",
+          "condition": "句柄未用 with 关闭（长稳暴露泄漏）"
+        }
+      ]
+    }
+  ],
+  "bugfix": {
+    "must_add": [
+      "regression",
+      "reproduce_case"
+    ]
+  },
+  "regression_scope": {
+    "default": "module",
+    "escalate": "chain"
+  },
+  "risk_model": {
+    "layer_weights": {
+      "frontend_ui": 2,
+      "frontend_logic": 2,
+      "api_surface": 3,
+      "backend_logic": 3,
+      "db_schema": 4,
+      "config": 2,
+      "dependency": 3,
+      "test_code": 1
+    },
+    "signal_weights": {
+      "sens:hardcoded_secret": 4,
+      "sens:sql_concat": 4,
+      "sens:shell_exec": 3,
+      "sens:auth_surface": 2,
+      "sens:concurrency": 3,
+      "sens:money_tx": 3,
+      "sens:perf_hotpath": 1,
+      "sens:resource_leak": 1,
+      "file:deleted": 3,
+      "flag:bugfix": 1
+    },
+    "thresholds": {
+      "medium": 6,
+      "high": 10
+    },
+    "level_names": {
+      "low": "低风险",
+      "medium": "中风险",
+      "high": "高风险"
+    }
+  },
+  "trace": {
+    "path_priority": true,
+    "type_fallback": true
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "requirements": [
+    {"id": "REQ-101", "paths": ["services/payment/*"], "desc": "支付扣款服务"},
+    {"id": "REQ-102", "paths": ["services/user/*"], "desc": "用户中心"},
+    {"id": "REQ-103", "paths": ["web/src/login/*"], "desc": "登录流程"}
+  ],
+  "cases": [
+    {"id": "TC-001", "name": "支付金额边界与除零", "paths": ["services/payment/pay.py"], "types": ["functional", "idempotency"]},
+    {"id": "TC-002", "name": "扣款幂等性（重复请求）", "paths": ["services/payment/*"], "types": ["idempotency", "data_integrity"]},
+    {"id": "TC-003", "name": "SQL 注入用例", "paths": ["services/*/dao/*"], "types": ["security", "fuzz"]},
+    {"id": "TC-004", "name": "支付接口契约快照", "paths": [], "types": ["contract"]},
+    {"id": "TC-005", "name": "全站冒烟", "paths": [], "types": ["smoke"]}
+  ]
+}
