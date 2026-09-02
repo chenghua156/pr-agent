@@ -35,6 +35,21 @@
 fnmatch 通配（`*` 含 `/`），`cases[].types` 用测试类型枚举（同 TYPE_NAMES 键）。
 映射文件来源建议：需求侧从 Bugzilla/需求单导出，用例侧从用例管理库打路径标签。
 
+## 输出语言（默认英文，可切中文）
+
+所有报告文案双语内建，开关三处生效（优先级：`--lang` 参数 > `PR_LANG` 环境变量 > 默认 `en`）：
+
+```bash
+python3 test_selector.py --diff pr.diff                 # 默认英文
+python3 test_selector.py --diff pr.diff --lang zh       # 中文
+PR_LANG=zh python3 test_selector.py --diff pr.diff      # 环境变量方式
+```
+
+- GitHub：workflow `test-selector` 手动触发可选 lang；push/PR 事件读仓库变量 `PR_LANG`
+- Jenkins：构建参数 `LANG_MODE`（en/zh，默认 en）
+- `testtypes.json` 机器契约字段不受语言影响；规则数据（rules.json 的 condition 文案）
+  属于配置内容，如需双语请自行维护
+
 ## 用法
 
 ```bash

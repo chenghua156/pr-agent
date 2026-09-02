@@ -1,0 +1,203 @@
+{
+  "must": {
+    "data_integrity": [
+      {
+        "file": "services/payment/pay.py",
+        "line": 12,
+        "rule": "sens:money_tx",
+        "evidence": "def charge(amount, rate):"
+      }
+    ],
+    "functional": [
+      {
+        "file": "services/payment/pay.py",
+        "rule": "layer:backend_logic"
+      },
+      {
+        "file": "services/payment/pay.py",
+        "line": 12,
+        "rule": "sens:money_tx",
+        "evidence": "def charge(amount, rate):"
+      }
+    ],
+    "fuzz": [
+      {
+        "file": "services/payment/pay.py",
+        "line": 9,
+        "rule": "sens:sql_concat",
+        "evidence": "sql = f\"SELECT * FROM users WHERE id = {user_id}\""
+      }
+    ],
+    "idempotency": [
+      {
+        "file": "services/payment/pay.py",
+        "line": 12,
+        "rule": "sens:money_tx",
+        "evidence": "def charge(amount, rate):"
+      }
+    ],
+    "integration": [
+      {
+        "file": "services/payment/pay.py",
+        "rule": "layer:backend_logic"
+      }
+    ],
+    "regression": [
+      {
+        "file": "services/payment/pay.py",
+        "rule": "layer:backend_logic"
+      },
+      {
+        "rule": "flag:bugfix",
+        "evidence": "--bugfix: reproduce case must go red→green first"
+      }
+    ],
+    "reproduce_case": [
+      {
+        "rule": "flag:bugfix",
+        "evidence": "--bugfix: reproduce case must go red→green first"
+      }
+    ],
+    "security": [
+      {
+        "file": "services/payment/pay.py",
+        "line": 4,
+        "rule": "sens:hardcoded_secret",
+        "evidence": "API_KEY = \"sk-live-a9f8d7c6b5e4f3a2d1c0\"  # from ops team"
+      },
+      {
+        "file": "services/payment/pay.py",
+        "line": 42,
+        "rule": "sens:auth_surface",
+        "evidence": "def audit(user, password):"
+      },
+      {
+        "file": "services/payment/pay.py",
+        "line": 9,
+        "rule": "sens:sql_concat",
+        "evidence": "sql = f\"SELECT * FROM users WHERE id = {user_id}\""
+      }
+    ]
+  },
+  "conditional": [
+    {
+      "type": "data_integrity",
+      "condition": "写库或事务",
+      "from": "layer:backend_logic"
+    },
+    {
+      "type": "fuzz",
+      "condition": "外部输入面大",
+      "from": "sens:auth_surface"
+    },
+    {
+      "type": "idempotency",
+      "condition": "订单/资金/重试语义",
+      "from": "layer:backend_logic"
+    },
+    {
+      "type": "performance_load",
+      "condition": "循环内查询/缓存失效/N+1",
+      "from": "sens:perf_hotpath"
+    },
+    {
+      "type": "performance_soak",
+      "condition": "句柄未用 with 关闭（长稳暴露泄漏）",
+      "from": "sens:resource_leak"
+    }
+  ],
+  "regression_scope": {
+    "level": "chain",
+    "reason": "risk score 22 ≥ high threshold (layer:backend_logic +w3, flag:bugfix +w1, sens:auth_surface +w2) → chain-level regression"
+  },
+  "risk": {
+    "score": 22,
+    "level": "high",
+    "drivers": [
+      {
+        "source": "layer:backend_logic",
+        "weight": 3
+      },
+      {
+        "source": "flag:bugfix",
+        "weight": 1
+      },
+      {
+        "source": "sens:auth_surface",
+        "weight": 2
+      },
+      {
+        "source": "sens:hardcoded_secret",
+        "weight": 4
+      },
+      {
+        "source": "sens:money_tx",
+        "weight": 3
+      },
+      {
+        "source": "sens:perf_hotpath",
+        "weight": 1
+      },
+      {
+        "source": "sens:resource_leak",
+        "weight": 1
+      },
+      {
+        "source": "sens:shell_exec",
+        "weight": 3
+      },
+      {
+        "source": "sens:sql_concat",
+        "weight": 4
+      }
+    ],
+    "level_name": "高风险"
+  },
+  "traceability": {
+    "requirements_linked": [
+      {
+        "id": "REQ-101",
+        "desc": "支付扣款服务"
+      }
+    ],
+    "regression_cases_selected": [
+      {
+        "id": "TC-001",
+        "name": "支付金额边界与除零",
+        "reason": "path",
+        "detail": "change hits case coverage path (classic TIA selected)"
+      },
+      {
+        "id": "TC-002",
+        "name": "扣款幂等性（重复请求）",
+        "reason": "path",
+        "detail": "change hits case coverage path (classic TIA selected)"
+      },
+      {
+        "id": "TC-003",
+        "name": "SQL 注入用例",
+        "reason": "type",
+        "detail": "case types hit must-list: fuzz,security"
+      }
+    ]
+  },
+  "layers_touched": [
+    "backend_logic"
+  ],
+  "signals": [
+    "flag:bugfix",
+    "layer:backend_logic",
+    "sens:auth_surface",
+    "sens:hardcoded_secret",
+    "sens:money_tx",
+    "sens:perf_hotpath",
+    "sens:resource_leak",
+    "sens:shell_exec",
+    "sens:sql_concat"
+  ],
+  "stats": {
+    "files": 1,
+    "added_lines": 43,
+    "removed_lines": 0
+  }
+}

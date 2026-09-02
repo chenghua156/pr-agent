@@ -9,10 +9,19 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      lang:
+        description: 'Report language (default en; repo variable PR_LANG applies to push/PR events)'
+        type: choice
+        options: ['en', 'zh']
+        default: 'en'
 
 jobs:
   select-test-types:
     runs-on: ubuntu-latest
+    env:
+      # 语言开关：手动输入 > 仓库变量 PR_LANG > 默认 en
+      PR_LANG: ${{ inputs.lang || vars.PR_LANG || 'en' }}
     steps:
       - uses: actions/checkout@v4
         with:

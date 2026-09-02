@@ -30,19 +30,88 @@ import json
 import re
 import sys
 
-# ---------------------------------------------------------------- 测试类型中文名（报告用）
-TYPE_NAMES = {
-    "ui_functional": "UI功能", "unit": "单元", "component": "组件", "e2e": "端到端E2E",
-    "smoke": "冒烟", "regression": "回归", "functional": "功能", "integration": "集成",
-    "contract": "契约", "consumer_contract": "消费者契约", "version_compat": "版本兼容",
-    "visual_regression": "视觉回归", "compatibility": "兼容性", "responsive": "响应式",
-    "i18n": "国际化", "session": "会话/登录态", "security": "安全", "fuzz": "模糊测试",
-    "data_integrity": "数据完整性", "idempotency": "幂等性",
-    "performance_load": "性能-负载", "performance_stress": "性能-压力",
-    "performance_spike": "性能-尖峰", "performance_soak": "性能-浸泡/长稳",
-    "capacity": "容量", "frontend_perf": "前端性能", "reliability_chaos": "可靠性/混沌",
-    "reproduce_case": "复现用例(转回归资产)",
+# ---------------------------------------------------------------- 双语目录（默认 en，PR_LANG/--lang 切换）
+LANG = {
+    "en": {
+        "types": {
+            "ui_functional": "UI Functional", "unit": "Unit", "component": "Component", "e2e": "E2E",
+            "smoke": "Smoke", "regression": "Regression", "functional": "Functional",
+            "integration": "Integration", "contract": "Contract", "consumer_contract": "Consumer Contract",
+            "version_compat": "Version Compat", "visual_regression": "Visual Regression",
+            "compatibility": "Compatibility", "responsive": "Responsive", "i18n": "i18n",
+            "session": "Session", "security": "Security", "fuzz": "Fuzz",
+            "data_integrity": "Data Integrity", "idempotency": "Idempotency",
+            "performance_load": "Perf-Load", "performance_stress": "Perf-Stress",
+            "performance_spike": "Perf-Spike", "performance_soak": "Perf-Soak",
+            "capacity": "Capacity", "frontend_perf": "Frontend Perf", "reliability_chaos": "Reliability/Chaos",
+            "reproduce_case": "Reproduce Case (→ regression asset)",
+        },
+        "report_title": "Test Type Selection Report (must %d / conditional %d / regression scope %s)",
+        "must": "MUST-TEST TYPES", "cond": "CONDITIONAL (decide by condition; agent-readable)",
+        "risk": "RISK LEVEL", "scope": "REGRESSION SCOPE", "reqs": "LINKED REQUIREMENTS (traceability③)",
+        "cases": "SELECTED REGRESSION CASES (classic TIA⑤)", "layers": "LAYERS TOUCHED",
+        "signals": "SIGNALS", "stats": "STATS",
+        "when": "when", "from": "from", "evidence": "evidence",
+        "path_match": "path", "type_match": "type",
+        "tia_path_detail": "change hits case coverage path (classic TIA selected)",
+        "tia_type_detail": "case types hit must-list: ",
+        "risk_fmt": "%s (score %d, %s)", "high": "High", "medium": "Medium", "low": "Low",
+        "stats_fmt": "files %d / added %d / removed %d",
+        "scope_default": "Default: module-level regression",
+        "scope_br": "blast_radius.escalate=true (dependency analysis) → chain-level regression + adversarial exploration",
+        "scope_risk": "risk score %d ≥ high threshold (%s) → chain-level regression",
+        "bugfix_evidence": "--bugfix: reproduce case must go red→green first",
+        "written_to": "Result written to %s",
+        "warn_bad_trace": "Warning: failed to load trace (%s), skipping traceability/case selection",
+        "warn_bad_br": "Warning: failed to load blast-radius (%s), ignoring linkage signal",
+        "err_read_diff": "Failed to read diff: %s", "err_no_files": "No file changes parsed from diff",
+    },
+    "zh": {
+        "types": {
+            "ui_functional": "UI功能", "unit": "单元", "component": "组件", "e2e": "端到端E2E",
+            "smoke": "冒烟", "regression": "回归", "functional": "功能", "integration": "集成",
+            "contract": "契约", "consumer_contract": "消费者契约", "version_compat": "版本兼容",
+            "visual_regression": "视觉回归", "compatibility": "兼容性", "responsive": "响应式",
+            "i18n": "国际化", "session": "会话/登录态", "security": "安全", "fuzz": "模糊测试",
+            "data_integrity": "数据完整性", "idempotency": "幂等性",
+            "performance_load": "性能-负载", "performance_stress": "性能-压力",
+            "performance_spike": "性能-尖峰", "performance_soak": "性能-浸泡/长稳",
+            "capacity": "容量", "frontend_perf": "前端性能", "reliability_chaos": "可靠性/混沌",
+            "reproduce_case": "复现用例(转回归资产)",
+        },
+        "report_title": "测试类型选择报告（必测 %d 类 / 条件选测 %d 类 / 回归范围 %s）",
+        "must": "必测类型", "cond": "条件选测（按 condition 成立与否取舍，可交 agent 判读）",
+        "risk": "风险分级", "scope": "回归范围", "reqs": "关联需求（追溯③）",
+        "cases": "选中回归用例（经典TIA⑤）", "layers": "改动层级",
+        "signals": "触发信号", "stats": "改动统计",
+        "when": "当", "from": "来自", "evidence": "证据",
+        "path_match": "path匹配", "type_match": "type匹配",
+        "tia_path_detail": "改动命中用例覆盖路径（经典TIA选中）",
+        "tia_type_detail": "用例类型命中必测: ",
+        "risk_fmt": "%s（分值 %d，%s）", "high": "高风险", "medium": "中风险", "low": "低风险",
+        "stats_fmt": "文件 %d / 新增 %d 行 / 删除 %d 行",
+        "scope_default": "默认：模块级回归",
+        "scope_br": "blast_radius.escalate=true（依赖分析）→ 升级链路级回归 + 对抗性探索",
+        "scope_risk": "风险分 %d ≥ 高阈值（%s）→ 升级链路级回归",
+        "bugfix_evidence": "--bugfix 指定：复现用例须先红后绿",
+        "written_to": "结果已写入 %s",
+        "warn_bad_trace": "警告：trace 读取失败(%s)，忽略追溯/用例选择",
+        "warn_bad_br": "警告：blast_radius 读取失败(%s)，忽略联动信号",
+        "err_read_diff": "读 diff 失败: %s", "err_no_files": "diff 中未解析到任何文件改动",
+    },
 }
+DEFAULT_LANG = "en"
+
+
+def resolve_lang(explicit=None):
+    """--lang > PR_LANG 环境变量 > 默认 en（本组件独立自包含，不依赖 pr_lang.py）。"""
+    import os
+    raw = (explicit or os.environ.get("PR_LANG") or DEFAULT_LANG).strip().lower()
+    if raw in ("zh", "cn", "zh-cn", "zh_cn", "chinese", "zh-hans"):
+        return "zh"
+    if raw != "en" and raw:
+        print("test_selector: unknown lang %r, fallback to 'en'" % raw, flush=True)
+    return "en"
 
 # ---------------------------------------------------------------- 内置规则（--rules 可外部覆盖）
 DEFAULT_RULES = {
@@ -242,8 +311,9 @@ def risk_score(layers_hit, signals, rules):
             "level_name": rules.get("risk_model", {}).get("level_names", {}).get(level, level)}
 
 
-def link_trace(files, must_types, trace, rules):
+def link_trace(files, must_types, trace, rules, lang="en"):
     """③需求追溯 + ⑤经典TIA回归用例选择。路径命中优先，类型交集兜底。"""
+    L = LANG[lang]
     if not trace:
         return {"requirements_linked": [], "regression_cases_selected": []}
     cfg = rules.get("trace", {})
@@ -258,16 +328,16 @@ def link_trace(files, must_types, trace, rules):
     for c in trace.get("cases", []):
         if cfg.get("path_priority", True) and hit(c.get("paths")):
             sel.append({"id": c["id"], "name": c.get("name", ""), "reason": "path",
-                        "detail": "改动命中用例覆盖路径（经典TIA选中）"})
+                        "detail": L["tia_path_detail"]})
         elif cfg.get("type_fallback", True):
             tm = sorted(set(c.get("types", [])) & set(must_types))
             if tm:
                 sel.append({"id": c["id"], "name": c.get("name", ""), "reason": "type",
-                            "detail": "用例类型命中必测: " + ",".join(tm)})
+                            "detail": L["tia_type_detail"] + ",".join(tm)})
     return {"requirements_linked": reqs, "regression_cases_selected": sel}
 
 
-def analyze(files, rules, bugfix, blast_radius, trace=None):
+def analyze(files, rules, bugfix, blast_radius, trace=None, lang="en"):
     must = {}       # type -> [evidence,...]
     cond = {}       # (type, condition) -> 已见层级/规则
     layers_hit = set()
@@ -311,27 +381,27 @@ def analyze(files, rules, bugfix, blast_radius, trace=None):
     if bugfix:
         signals.add("flag:bugfix")
         for t in rules["bugfix"]["must_add"]:
-            add_must(t, {"rule": "flag:bugfix", "evidence": "--bugfix 指定：复现用例须先红后绿"})
+            add_must(t, {"rule": "flag:bugfix", "evidence": LANG[lang]["bugfix_evidence"]})
 
     # ④ 风险分级
     risk = risk_score(layers_hit, signals, rules)
 
     # 回归范围：blast_radius（②依赖分析，外挂）> 风险分级 > 默认模块级
     scope = rules["regression_scope"]["default"]
-    scope_reason = "默认：模块级回归"
+    scope_reason = LANG[lang]["scope_default"]
     if blast_radius:
         esc = blast_radius.get("escalate")
         if esc is True or str(esc).lower() == "true":
             scope = rules["regression_scope"]["escalate"]
-            scope_reason = "blast_radius.escalate=true（依赖分析）→ 升级链路级回归 + 对抗性探索"
+            scope_reason = LANG[lang]["scope_br"]
     if scope == rules["regression_scope"]["default"] and risk["level"] == "high":
         scope = rules["regression_scope"]["escalate"]
-        scope_reason = "风险分 %d ≥ 高阈值（%s）→ 升级链路级回归" % (
+        scope_reason = LANG[lang]["scope_risk"] % (
             risk["score"], ", ".join("%s +w%d" % (d["source"], d["weight"])
                                      for d in risk["drivers"][:3]))
 
     # ③⑤ 追溯 + 经典 TIA 用例选择
-    trace_res = link_trace(files, list(must.keys()), trace, rules)
+    trace_res = link_trace(files, list(must.keys()), trace, rules, lang)
 
     return {
         "must": {t: ev for t, ev in sorted(must.items())},
@@ -349,40 +419,43 @@ def analyze(files, rules, bugfix, blast_radius, trace=None):
 
 
 # ---------------------------------------------------------------- 报告
-def print_report(res):
-    name = lambda t: TYPE_NAMES.get(t, t)
+def print_report(res, lang="en"):
+    L = LANG[lang]
+    name = lambda t: L["types"].get(t, t)
     print("=" * 62)
-    print("测试类型选择报告（必测 %d 类 / 条件选测 %d 类 / 回归范围 %s）"
-          % (len(res["must"]), len(res["conditional"]), res["regression_scope"]["level"]))
+    print(L["report_title"] % (len(res["must"]), len(res["conditional"]),
+                               res["regression_scope"]["level"]))
     print("=" * 62)
-    print("\n【必测类型】")
+    print("\n【%s】" % L["must"])
     for t, evs in res["must"].items():
         print("  ▶ %s (%s)" % (name(t), t))
         for e in evs:
             loc = e.get("file", "-") + ((":" + str(e["line"])) if e.get("line") else "")
             print("      - %s  [%s]" % (loc, e["rule"]))
             if e.get("evidence"):
-                print("        证据: %s" % e["evidence"])
-    print("\n【条件选测】（按 condition 成立与否取舍，可交 agent 判读）")
+                print("        %s: %s" % (L["evidence"].capitalize() if lang == "en" else L["evidence"], e["evidence"]))
+    print("\n【%s】" % L["cond"])
     for c in res["conditional"]:
-        print("  ○ %s (%s)  当: %s  来自 %s" % (name(c["type"]), c["type"], c["condition"], c["from"]))
-    print("\n【风险分级】%s（分值 %d，%s）" % (
-        res["risk"]["level_name"], res["risk"]["score"],
-        "; ".join("%s +w%d" % (d["source"], d["weight"]) for d in res["risk"]["drivers"])))
-    print("\n【回归范围】%s — %s" % (res["regression_scope"]["level"], res["regression_scope"]["reason"]))
+        print("  ○ %s (%s)  %s: %s  %s %s" % (name(c["type"]), c["type"], L["when"], c["condition"], L["from"], c["from"]))
+    level_disp = L[res["risk"]["level"]]
+    print("\n【%s】%s" % (L["risk"], L["risk_fmt"] % (
+        level_disp, res["risk"]["score"],
+        "; ".join("%s +w%d" % (d["source"], d["weight"]) for d in res["risk"]["drivers"]))))
+    print("\n【%s】%s — %s" % (L["scope"], res["regression_scope"]["level"], res["regression_scope"]["reason"]))
     tr = res.get("traceability") or {}
     if tr.get("requirements_linked"):
-        print("\n【关联需求（追溯③）】")
+        print("\n【%s】" % L["reqs"])
         for r in tr["requirements_linked"]:
             print("  ◆ %s  %s" % (r["id"], r["desc"]))
     if tr.get("regression_cases_selected"):
-        print("\n【选中回归用例（经典TIA⑤）】")
+        print("\n【%s】" % L["cases"])
         for c in tr["regression_cases_selected"]:
-            print("  ● %s %s  [%s匹配] %s" % (c["id"], c["name"], c["reason"], c["detail"]))
-    print("\n【改动层级】%s" % ", ".join(res["layers_touched"]))
-    print("【触发信号】%s" % ", ".join(res["signals"]))
-    print("【改动统计】文件 %d / 新增 %d 行 / 删除 %d 行"
-          % (res["stats"]["files"], res["stats"]["added_lines"], res["stats"]["removed_lines"]))
+            tag = L["path_match"] if c["reason"] == "path" else L["type_match"]
+            print("  ● %s %s  [%s] %s" % (c["id"], c["name"], tag, c["detail"]))
+    print("\n【%s】%s" % (L["layers"], ", ".join(res["layers_touched"])))
+    print("【%s】%s" % (L["signals"], ", ".join(res["signals"])))
+    print("【%s】%s" % (L["stats"], L["stats_fmt"] % (
+        res["stats"]["files"], res["stats"]["added_lines"], res["stats"]["removed_lines"])))
 
 
 # ---------------------------------------------------------------- main
@@ -394,6 +467,7 @@ def main():
     ap.add_argument("--trace", help="trace.json：需求/用例与代码路径映射（追溯③+经典TIA⑤）")
     ap.add_argument("--rules", help="外部规则文件（缺省用内置规则）")
     ap.add_argument("--out", help="结果写入 JSON 文件")
+    ap.add_argument("--lang", choices=["en", "zh"], help="输出语言（默认 PR_LANG 环境变量/en）")
     ap.add_argument("--dump-rules", action="store_true", help="导出内置规则到 stdout 后退出")
     args = ap.parse_args()
 
@@ -411,12 +485,12 @@ def main():
         with open(args.diff, encoding="utf-8", errors="replace") as fh:
             text = fh.read()
     except OSError as e:
-        print("读 diff 失败: %s" % e, file=sys.stderr)
+        print(LANG[resolve_lang(args.lang)]["err_read_diff"] % e, file=sys.stderr)
         return 2
 
     files = parse_diff(text)
     if not files:
-        print("diff 中未解析到任何文件改动", file=sys.stderr)
+        print(LANG[resolve_lang(args.lang)]["err_no_files"], file=sys.stderr)
         return 2
 
     br = None
@@ -425,7 +499,7 @@ def main():
             with open(args.blast_radius, encoding="utf-8") as fh:
                 br = json.load(fh)
         except (OSError, ValueError) as e:
-            print("警告：blast_radius 读取失败(%s)，忽略联动信号" % e, file=sys.stderr)
+            print(LANG[resolve_lang(args.lang)]["warn_bad_br"] % e, file=sys.stderr)
 
     trace = None
     if args.trace:
@@ -433,14 +507,15 @@ def main():
             with open(args.trace, encoding="utf-8") as fh:
                 trace = json.load(fh)
         except (OSError, ValueError) as e:
-            print("警告：trace 读取失败(%s)，忽略追溯/用例选择" % e, file=sys.stderr)
+            print(LANG[resolve_lang(args.lang)]["warn_bad_trace"] % e, file=sys.stderr)
 
-    res = analyze(files, rules, args.bugfix, br, trace)
-    print_report(res)
+    lang = resolve_lang(args.lang)
+    res = analyze(files, rules, args.bugfix, br, trace, lang)
+    print_report(res, lang)
     if args.out:
         with open(args.out, "w", encoding="utf-8") as fh:
             json.dump(res, fh, ensure_ascii=False, indent=2)
-        print("\n结果已写入 %s" % args.out)
+        print("\n" + LANG[lang]["written_to"] % args.out)
     return 0
 
 
