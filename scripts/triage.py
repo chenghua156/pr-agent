@@ -293,7 +293,8 @@ def main():
         for c in comments if isinstance(comments, list) else []:
             m = re.search(r"\[COVERAGE-ALERT\]\s*(.+)", str(c))
             if m:
-                coverage_warning = m.group(1).strip()
+                # 模型可能把告警嵌进 markdown 表格/HTML，截到首个标签或换行
+                coverage_warning = re.split(r"[<\n]", m.group(1).strip())[0].strip()
                 break
     else:
         sys.exit("错误：需要 --findings 或 --pr 之一作为发现来源")
