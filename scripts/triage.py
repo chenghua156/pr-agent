@@ -174,6 +174,16 @@ def llm_triage(findings, ledger, diff_text, cfg):
                  .replace("{NOISE_LEDGER}", ledger_brief or "（空）")
                  .replace("{FINDINGS}", json.dumps(findings, ensure_ascii=False, indent=1))
                  .replace("{DIFF}", (diff_text or "（未提供）")[:60000]))
+    # 语言统一（pr_lang）：AI 产出的 title/evidence/fix/summary 按开关语言输出，默认英文
+    from pr_lang import resolve_lang
+    _lang = resolve_lang()
+    prompt += {
+        "en": "\n\nOUTPUT LANGUAGE REQUIREMENT: write every human-readable field "
+              "(title, evidence, fix, summary) in English. Keep code identifiers, file "
+              "paths and log excerpts as-is; severity/confidence stay enum/numeric.",
+        "zh": "\n\n输出语言要求：title、evidence、fix、summary 等人类可读字段一律用中文书写；"
+              "代码标识符、文件路径、日志摘录保持原样；severity/confidence 保持枚举/数值。",
+    }[_lang]
     backend = cfg["models"].get("triage_backend", "openai")
     if backend == "dsh":
         return {"mode": "dsh", **dsh_triage(prompt, cfg)}
@@ -264,15 +274,32 @@ def main():
     cfg = load_config(args.config)
     ledger = load_json(args.ledger, {"patterns": [], "votes": []})
 
+    coverage_warning = None
     if args.findings:
         raw = load_json(args.findings, [])
         findings = raw.get("findings", []) if isinstance(raw, dict) else raw
         findings = [f for f in findings if isinstance(f, dict)]
+        if isinstance(raw, dict) and raw.get("coverage_warning"):
+            # findings_export 的 T6 覆盖侧车：初审被 token 预算截断时显式告警
+            coverage_warning = raw.get("coverage_warning")
+            cov = raw.get("review_coverage", {})
+            dropped = cov.get("dropped_files", [])
+            if dropped:
+                coverage_warning += " | dropped: " + ", ".join(dropped[:8]) + ("…" if len(dropped) > 8 else "")
     elif args.pr:
-        findings = parse_findings_from_comments(fetch_pr_comments(args.pr))
+        comments = fetch_pr_comments(args.pr)
+        findings = parse_findings_from_comments(comments)
+        # 托管路径兜底：初审模型按 extra_instructions 在评论里回显覆盖告警
+        for c in comments if isinstance(comments, list) else []:
+            m = re.search(r"\[COVERAGE-ALERT\]\s*(.+)", str(c))
+            if m:
+                coverage_warning = m.group(1).strip()
+                break
     else:
         sys.exit("错误：需要 --findings 或 --pr 之一作为发现来源")
     print(f"[triage] 初审发现 {len(findings)} 条（噪音台账 {len(ledger.get('patterns', []))} 条模式）")
+    if coverage_warning:
+        print(f"[triage] ⚠️ 审查覆盖告警：{coverage_warning}")
 
     if not findings:
         result = {"mode": "empty", "findings": [], "archived": [],
@@ -282,6 +309,8 @@ def main():
     else:
         diff_text = open(args.diff, encoding="utf-8").read() if args.diff else ""
         result = llm_triage(findings, ledger, diff_text, cfg)
+    if coverage_warning:
+        result["coverage_warning"] = coverage_warning
 
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=1)

@@ -32,7 +32,12 @@ evidence: 具体代码路径与调用链证据（必须真实存在于本 diff �
 fix: 具体修复建议
 
 severity 标准：critical=安全漏洞/数据损坏/崩溃/资金风险；medium=逻辑缺陷/并发/泄漏/性能退化；low=其余真实问题。\
-宁可多报，由下游分诊。confidence 为你对"证据真实存在"的把握，不是对风格的把握。"""
+宁可多报，由下游分诊。confidence 为你对"证据真实存在"的把握，不是对风格的把握。
+Output language: English — write title/evidence/fix in English; keep code identifiers, \
+file paths and log excerpts as-is. （切中文：把本行改为“输出语言：中文——title/evidence/fix 用中文书写。”）
+Coverage echo: if the diff mentions files dropped for "insufficient token budget", you MUST \
+start the security_concerns answer with the line \
+[COVERAGE-ALERT] reviewed=N/M files, dropped: <file list> before anything else."""
 
 [pr_code_suggestions]
 # ---- 以下键名已对照 v0.43.0 源码核实 ----
