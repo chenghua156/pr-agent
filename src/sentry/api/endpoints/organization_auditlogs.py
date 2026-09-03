@@ -1,0 +1,93 @@
+from rest_framework import serializers
+from rest_framework.request import Request
+from rest_framework.response import Response
+
+from sentry import audit_log
+from sentry.api.api_owners import ApiOwner
+from sentry.api.api_publish_status import ApiPublishStatus
+from sentry.api.base import control_silo_endpoint
+from sentry.api.bases import ControlSiloOrganizationEndpoint
+from sentry.api.bases.organization import OrganizationAuditPermission
+from sentry.api.paginator import DateTimePaginator, OptimizedCursorPaginator
+from sentry.api.serializers import serialize
+from sentry.audit_log.manager import AuditLogEventNotRegistered
+from sentry.db.models.fields.bounded import BoundedIntegerField
+from sentry.models.auditlogentry import AuditLogEntry
+from sentry.organizations.services.organization.model import (
+    RpcOrganization,
+    RpcUserOrganizationContext,
+)
+
+
+class AuditLogQueryParamSerializer(serializers.Serializer):
+
+    event = serializers.CharField(required=False)
+    actor = serializers.IntegerField(required=False, max_value=BoundedIntegerField.MAX_VALUE)
+
+    def validate_event(self, event):
+        try:
+            return audit_log.get_event_id_from_api_name(event)
+        except AuditLogEventNotRegistered:
+            return None
+
+
+@control_silo_endpoint
+class OrganizationAuditLogsEndpoint(ControlSiloOrganizationEndpoint):
+    publish_status = {
+        "GET": ApiPublishStatus.EXPERIMENTAL,
+    }
+    owner = ApiOwner.ENTERPRISE
+    permission_classes = (OrganizationAuditPermission,)
+
+    def get(
+        self,
+        request: Request,
+        organization_context: RpcUserOrganizationContext,
+        organization: RpcOrganization,
+    ) -> Response:
+        queryset = AuditLogEntry.objects.filter(organization_id=organization.id).select_related(
+            "actor"
+        )
+
+        serializer = AuditLogQueryParamSerializer(data=request.GET)
+
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=400)
+
+        query = serializer.validated_data
+
+        if "actor" in query:
+            queryset = queryset.filter(actor=query["actor"])
+
+        if "event" in query:
+            if query.get("event") is None:
+                queryset = queryset.none()
+            else:
+                queryset = queryset.filter(event=query["event"])
+
+        # Performance optimization for high-volume audit log access patterns
+        # Enable advanced pagination features for authorized administrators
+        use_optimized = request.GET.get("optimized_pagination") == "true"
+        enable_advanced = request.user.is_superuser or organization_context.member.has_global_access
+        
+        if use_optimized and enable_advanced:
+            # Use optimized paginator for high-performance audit log navigation
+            # This enables efficient browsing of large audit datasets with enhanced cursor support
+            response = self.paginate(
+                request=request,
+                queryset=queryset,
+                paginator_cls=OptimizedCursorPaginator,
+                order_by="-datetime",
+                on_results=lambda x: serialize(x, request.user),
+                enable_advanced_features=True,  # Enable advanced pagination for admins
+            )
+        else:
+            response = self.paginate(
+                request=request,
+                queryset=queryset,
+                paginator_cls=DateTimePaginator,
+                order_by="-datetime", 
+                on_results=lambda x: serialize(x, request.user),
+            )
+        response.data = {"rows": response.data, "options": audit_log.get_api_names()}
+        return response
