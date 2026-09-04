@@ -42,25 +42,29 @@ jobs:
 
       - name: 初审（分片审查，全量覆盖）
         env:
-          # 所有含点号的变量通过临时 .secrets.toml 传递（bash 不允许 export VAR.NAME=...）
           M_KEY: ${{ secrets.MINIMAX_KEY }}
           M_BASE: ${{ vars.MODEL_BASE || 'https://api.minimaxi.com/v1' }}
           M_NAME: ${{ vars.MODEL_NAME || 'openai/MiniMax-M3' }}
           PR_AGENT_BIN: ${{ github.workspace }}/.venv/bin/pr-agent
         run: |
-          # 写入临时 secrets.toml（pr-agent CLI 的 Dynaconf 从这里读模型配置）
+          # 写入 .secrets.toml（格式与本地部署完全一致，经 Dynaconf 验证）
           cat > pr_agent/settings/.secrets.toml <<TOML
-          litellm_api_key = "${M_KEY}"
-          openai_key = "${M_KEY}"
           [config]
           model = "${M_NAME}"
           fallback_models = []
-          [config.litellm]
+          custom_model_max_tokens = 16000
+          ai_timeout = 300
+
+          [openai]
+          key = "${M_KEY}"
           api_base = "${M_BASE}"
+
+          [pr_reviewer]
+          findings_output_file = "ci-findings.json"
+          findings_output_root = "${PWD}"
+          num_max_findings = 8
           TOML
           export FINDINGS_OUT="$PWD/ci-findings.json"
-          export PR_REVIEWER_FINDINGS_OUTPUT_FILE=ci-findings.json
-          export PR_REVIEWER_FINDINGS_OUTPUT_ROOT="$PWD"
           python3 scripts/chunk_review.py \
             --diff pr.diff \
             --out findings.json \
