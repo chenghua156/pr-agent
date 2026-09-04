@@ -42,22 +42,31 @@ jobs:
 
       - name: 初审（分片审查，全量覆盖）
         env:
-          # 模型配置：换模型改这三个（或在仓库 Settings→Variables 配 MODEL_NAME/MODEL_BASE）
-          OPENAI_KEY: ${{ secrets.MINIMAX_KEY }}
-          OPENAI.API_BASE: ${{ vars.MODEL_BASE || 'https://api.minimaxi.com/v1' }}
-          CONFIG.MODEL: ${{ vars.MODEL_NAME || 'openai/MiniMax-M3' }}
-          PR_REVIEWER.FINDINGS_OUTPUT_FILE: ci-findings.json
-          PR_REVIEWER.FINDINGS_OUTPUT_ROOT: ${{ github.workspace }}
-          CONFIG.CUSTOM_MODEL_MAX_TOKENS: "16000"
+          # 所有含点号的变量通过临时 .secrets.toml 传递（bash 不允许 export VAR.NAME=...）
+          M_KEY: ${{ secrets.MINIMAX_KEY }}
+          M_BASE: ${{ vars.MODEL_BASE || 'https://api.minimaxi.com/v1' }}
+          M_NAME: ${{ vars.MODEL_NAME || 'openai/MiniMax-M3' }}
           PR_AGENT_BIN: ${{ github.workspace }}/.venv/bin/pr-agent
-          FINDINGS_OUT: ${{ github.workspace }}/ci-findings.json
         run: |
-          # 所有含点号的变量已在上方 env: 块设置（bash 不允许 export VAR.NAME=...）
+          # 写入临时 secrets.toml（pr-agent CLI 的 Dynaconf 从这里读模型配置）
+          cat > pr_agent/settings/.secrets.toml <<TOML
+          litellm_api_key = "${M_KEY}"
+          openai_key = "${M_KEY}"
+          [config]
+          model = "${M_NAME}"
+          fallback_models = []
+          [config.litellm]
+          api_base = "${M_BASE}"
+          TOML
+          export FINDINGS_OUT="$PWD/ci-findings.json"
+          export PR_REVIEWER_FINDINGS_OUTPUT_FILE=ci-findings.json
+          export PR_REVIEWER_FINDINGS_OUTPUT_ROOT="$PWD"
           python3 scripts/chunk_review.py \
             --diff pr.diff \
             --out findings.json \
             --config config/pipeline.json \
             --max-chunk-tokens 7000
+          rm -f pr_agent/settings/.secrets.toml
 
       # ---- Stage 3: 分诊降噪（JSON 直入，不走评论解析）----
       - name: 分诊
