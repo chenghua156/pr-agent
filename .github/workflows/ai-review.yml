@@ -46,7 +46,7 @@ jobs:
           M_BASE: ${{ vars.MODEL_BASE || 'https://api.minimaxi.com/v1' }}
           M_NAME: ${{ vars.MODEL_NAME || 'openai/MiniMax-M3' }}
         run: |
-          # 1) 写 .secrets.toml（本地验证过的格式）
+          # 1) 写 .secrets.toml（模型密钥）+ 追加 findings_output 到 .pr_agent.toml（优先级更高）
           cat > pr_agent/settings/.secrets.toml <<TOML
           [config]
           model = "${M_NAME}"
@@ -57,18 +57,15 @@ jobs:
           [openai]
           key = "${M_KEY}"
           api_base = "${M_BASE}"
-
-          [pr_reviewer]
-          findings_output_file = "ci-findings.json"
-          findings_output_root = "${PWD}"
-          num_max_findings = 8
           TOML
+          # findings_output 写入 .pr_agent.toml（repo 级，引擎必读）
+          echo '' >> .pr_agent.toml
+          echo '[pr_reviewer.findings]' >> .pr_agent.toml
+          echo 'findings_output_file = "ci-findings.json"' >> .pr_agent.toml
+          echo "findings_output_root = \"${PWD}\"" >> .pr_agent.toml
+          echo 'num_max_findings = 8' >> .pr_agent.toml
 
-          # 2) 打印实际写入的文件（密钥脱敏）
-          echo "── .secrets.toml 内容 ──"
-          sed 's/key = ".*/key = "***"/' pr_agent/settings/.secrets.toml
-
-          # 3) Dynaconf 冒烟：引擎自己能不能读到
+          # 2) Dynaconf 冒烟（含 findings_output 检查）
           echo "── Dynaconf 冒烟 ──"
           .venv/bin/python -c "
           from pr_agent.config_loader import get_settings
@@ -76,19 +73,26 @@ jobs:
           print('model:', s.config.model)
           print('api_base:', s.openai.api_base)
           print('key_len:', len(s.openai.key) if s.openai.key else 0)
+          print('findings_output_file:', s.pr_reviewer.get('findings_output_file', 'MISSING'))
+          print('findings_output_root:', s.pr_reviewer.get('findings_output_root', 'MISSING'))
           " 2>&1
 
-          # 4) 直接调引擎（不走 chunk_review 的 subprocess 包装）
+          # 3) 直调引擎
           echo "── 直调引擎 ──"
-          .venv/bin/pr-agent --diff-file pr.diff review 2>&1 | tail -20
+          set +e
+          .venv/bin/pr-agent --diff-file pr.diff review > engine_output.log 2>&1
+          ENGINE_EXIT=$?
+          set -e
+          echo "引擎退出码: $ENGINE_EXIT"
 
-          # 5) 检查 findings 是否产出
+          # 4) 检查 findings
           if [ -f ci-findings.json ]; then
             echo "── findings 产出 ──"
             python3 -c "import json; d=json.load(open('ci-findings.json')); print('findings:', len(d.get('findings',[])))"
             cp ci-findings.json findings.json
           else
-            echo "⚠️ 引擎未产出 findings.json"
+            echo "⚠️ ci-findings.json 不存在；检查 engine_output.log"
+            tail -5 engine_output.log
             echo '{"source":"pr-agent","findings":[],"run":{}}' > findings.json
           fi
           rm -f pr_agent/settings/.secrets.toml
