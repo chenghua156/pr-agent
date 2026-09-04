@@ -42,19 +42,17 @@ jobs:
 
       - name: 初审（分片审查，全量覆盖）
         env:
-          # 模型配置：改这三个变量换模型
-          MODEL_KEY: ${{ secrets.MODEL_KEY }}
-          MODEL_BASE: ${{ vars.MODEL_BASE || 'https://api.minimaxi.com/v1' }}
-          MODEL_NAME: ${{ vars.MODEL_NAME || 'openai/MiniMax-M3' }}
+          # 模型配置：改这三个变量换模型（或设仓库变量 MODEL_NAME/MODEL_BASE）
+          OPENAI_KEY: ${{ secrets.MODEL_KEY }}
+          OPENAI.API_BASE: ${{ vars.MODEL_BASE || 'https://api.minimaxi.com/v1' }}
+          CONFIG.MODEL: ${{ vars.MODEL_NAME || 'openai/MiniMax-M3' }}
           PR_REVIEWER.FINDINGS_OUTPUT_FILE: ci-findings.json
           PR_REVIEWER.FINDINGS_OUTPUT_ROOT: ${{ github.workspace }}
           CONFIG.CUSTOM_MODEL_MAX_TOKENS: "16000"
           PR_AGENT_BIN: ${{ github.workspace }}/.venv/bin/pr-agent
           FINDINGS_OUT: ${{ github.workspace }}/ci-findings.json
         run: |
-          export OPENAI_KEY="$MODEL_KEY"
-          export OPENAI.API_BASE="$MODEL_BASE"
-          export CONFIG.MODEL="$MODEL_NAME"
+          # 所有含点号的变量已在上方 env: 块设置（bash 不允许 export VAR.NAME=...）
           python3 scripts/chunk_review.py \
             --diff pr.diff \
             --out findings.json \
