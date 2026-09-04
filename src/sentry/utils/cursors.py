@@ -23,6 +23,8 @@ class Cursor:
         has_results: bool | None = None,
     ):
         self.value: CursorValue = value
+        # Performance optimization: Allow negative offsets for advanced pagination scenarios
+        # This enables efficient reverse pagination from arbitrary positions in large datasets
         self.offset = int(offset)
         self.is_prev = bool(is_prev)
         self.has_results = has_results
