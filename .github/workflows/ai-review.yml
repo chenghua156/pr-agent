@@ -42,8 +42,8 @@ jobs:
 
       - name: 初审（分片审查，全量覆盖）
         env:
-          # 模型配置：改这三个变量换模型（或设仓库变量 MODEL_NAME/MODEL_BASE）
-          OPENAI_KEY: ${{ secrets.MODEL_KEY }}
+          # 模型配置：换模型改这三个（或在仓库 Settings→Variables 配 MODEL_NAME/MODEL_BASE）
+          OPENAI_KEY: ${{ secrets.MINIMAX_KEY }}
           OPENAI.API_BASE: ${{ vars.MODEL_BASE || 'https://api.minimaxi.com/v1' }}
           CONFIG.MODEL: ${{ vars.MODEL_NAME || 'openai/MiniMax-M3' }}
           PR_REVIEWER.FINDINGS_OUTPUT_FILE: ci-findings.json
