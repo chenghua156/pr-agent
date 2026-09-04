@@ -46,7 +46,7 @@ jobs:
           M_BASE: ${{ vars.MODEL_BASE || 'https://api.minimaxi.com/v1' }}
           M_NAME: ${{ vars.MODEL_NAME || 'openai/MiniMax-M3' }}
         run: |
-          # 1) 写 .secrets.toml（模型密钥）+ 追加 findings_output 到 .pr_agent.toml（优先级更高）
+          # 1) 写 .secrets.toml（模型密钥）
           cat > pr_agent/settings/.secrets.toml <<TOML
           [config]
           model = "${M_NAME}"
@@ -58,23 +58,13 @@ jobs:
           key = "${M_KEY}"
           api_base = "${M_BASE}"
           TOML
-          # findings_output 写入 .pr_agent.toml（repo 级，引擎必读）
-          echo '' >> .pr_agent.toml
-          echo '[pr_reviewer.findings]' >> .pr_agent.toml
-          echo 'findings_output_file = "ci-findings.json"' >> .pr_agent.toml
-          echo "findings_output_root = \"${PWD}\"" >> .pr_agent.toml
-          echo 'num_max_findings = 8' >> .pr_agent.toml
 
-          # 2) Dynaconf 冒烟（含 findings_output 检查）
-          echo "── Dynaconf 冒烟 ──"
+          # 2) Dynaconf 冒烟
           .venv/bin/python -c "
           from pr_agent.config_loader import get_settings
           s = get_settings()
           print('model:', s.config.model)
-          print('api_base:', s.openai.api_base)
           print('key_len:', len(s.openai.key) if s.openai.key else 0)
-          print('findings_output_file:', s.pr_reviewer.get('findings_output_file', 'MISSING'))
-          print('findings_output_root:', s.pr_reviewer.get('findings_output_root', 'MISSING'))
           " 2>&1
 
           # 3) 直调引擎
@@ -85,16 +75,49 @@ jobs:
           set -e
           echo "引擎退出码: $ENGINE_EXIT"
 
-          # 4) 检查 findings
-          if [ -f ci-findings.json ]; then
-            echo "── findings 产出 ──"
-            python3 -c "import json; d=json.load(open('ci-findings.json')); print('findings:', len(d.get('findings',[])))"
-            cp ci-findings.json findings.json
-          else
-            echo "⚠️ ci-findings.json 不存在；检查 engine_output.log"
-            tail -5 engine_output.log
-            echo '{"source":"pr-agent","findings":[],"run":{}}' > findings.json
-          fi
+          # 4) 从 stdout 解析发现（不依赖 findings_export 补丁）
+          #    引擎输出 <strong>Title</strong><br>Content 格式的 issue 列表
+          echo "── 从引擎 stdout 解析发现 ──"
+          python3 - <<'PYEOF'
+          import json, re, sys
+
+          text = open("engine_output.log", encoding="utf-8", errors="replace").read()
+
+          # 匹配引擎输出的 issue 模式：<strong>Title</strong><br>Content
+          issues = re.findall(r'<strong>(.+?)</strong><br>(.*?)(?=<strong>|$)', text, re.S)
+          findings = []
+          for i, (title, content) in enumerate(issues, 1):
+              content = content.strip()[:500]
+              # 判断 severity
+              sev = "medium"
+              low_kw = ["style", "naming", "format", "comment", "typo"]
+              if any(k in title.lower() for k in low_kw):
+                  sev = "low"
+              elif any(k in content.lower() for k in ["security", "injection", "crash", "data loss", "vulnerability"]):
+                  sev = "critical"
+              findings.append({
+                  "id": f"S{i}",
+                  "severity": sev,
+                  "confidence": 0.7,
+                  "file": "",
+                  "line": 0,
+                  "title": title.strip(),
+                  "evidence": content,
+                  "fix": "",
+                  "source": "stdout-parse",
+              })
+
+          envelope = {
+              "source": "pr-agent-stdout",
+              "findings": findings,
+              "run": {"engine_exit": 0},
+          }
+          json.dump(envelope, open("findings.json", "w"), ensure_ascii=False, indent=1)
+          print(f"解析出 {len(findings)} 条发现")
+          for f in findings:
+              print(f"  [{f['severity']}] {f['title'][:70]}")
+          PYEOF
+
           rm -f pr_agent/settings/.secrets.toml
 
       # ---- Stage 3: 分诊降噪（JSON 直入，不走评论解析）----
