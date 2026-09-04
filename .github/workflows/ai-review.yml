@@ -1,12 +1,13 @@
-# Stage 2 + 3 + 4：AI 初审 -> 分诊降噪 -> 分级动作
-# 复制到目标仓库 .github/workflows/ai-review.yml
-# 前置：仓库 secrets 配置 TRIAGE_API_KEY（分诊模型密钥）；.pr_agent.toml 已在仓库根
+# Stage 2 + 3 + 4：AI 初审（自装引擎 JSON 直出）→ 分诊降噪 → 分级动作
+# v3：彻底替换托管 Action —— 本仓库即 pr-agent 引擎，CI 直接跑 CLI，
+#      JSON 直出 findings.json，跳过评论解析，消灭 [AI-FINDING] 契约失效
+#      和托管 Action 的 continue-on-error 静默失败。
+# 前置：仓库 secrets 配置 MODEL_KEY（初审模型密钥）；.pr_agent.toml 已在仓库根
 name: ai-review
 
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-  # 分诊依赖初审评论已存在；synchronize 触发时 PR-Agent Action 先跑，本 job 读取其评论
 
 permissions:
   contents: read
@@ -16,68 +17,51 @@ permissions:
 jobs:
   review:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-        with: {fetch-depth: 0}   # 爆炸半径的三点 diff 需要 merge-base，浅克隆会 exit 128
+        with: {fetch-depth: 0}
 
-      # ---- Stage 2a：diff 规模判定 + 超预算分片初审（全量覆盖，防静默丢文件）----
-      # 托管 Action 是单遍审查，diff 超 ~1200 行即开始整文件丢弃（custom_model_max_tokens=16000）。
-      # 超预算时改走本仓库自装引擎的分片审查（chunk_review.py：按文件切片 map-reduce），
-      # 每片独立过审后合并 findings.json，走 JSON 直出通道（不经评论解析）。
-      - name: 生成 pr.diff 并判定规模
-        id: size
+      # ---- Stage 0: 生成 pr.diff ----
+      - name: 生成 pr.diff
         run: |
           git fetch origin ${{ github.base_ref }} --depth=1
           git diff origin/${{ github.base_ref }}...HEAD > pr.diff
-          LINES=$(wc -l < pr.diff)
-          OVERSIZE=$([ "$LINES" -gt 1200 ] && echo yes || echo no)
-          echo "lines=$LINES oversize=$OVERSIZE"
-          echo "oversize=$OVERSIZE" >> "$GITHUB_OUTPUT"
+          echo "diff 行数: $(wc -l < pr.diff)"
 
-      - name: 分片初审（超预算 PR：全量覆盖）
-        if: steps.size.outputs.oversize == 'yes'
-        env:
-          OPENAI_KEY: ${{ secrets.MINIMAX_KEY }}
-          CONFIG.MODEL: openai/MiniMax-M3
-          CONFIG.CUSTOM_MODEL_MAX_TOKENS: "16000"
-          OPENAI.API_BASE: https://api.minimaxi.com/v1
-          PR_REVIEWER.FINDINGS_OUTPUT_FILE: chunk-engine.json
-          PR_REVIEWER.FINDINGS_OUTPUT_ROOT: ${{ github.workspace }}
+      # ---- Stage 2: 自装引擎初审（JSON 直出，不走评论解析）----
+      # 本仓库即 pr-agent fork：uv 安装依赖 → CLI 直调 → findings.json
+      # 优势：① [AI-FINDING] 契约存活（不经 Pydantic 格式转换）
+      #       ② 分片审查全量覆盖（chunk_review.py）
+      #       ③ 失败可见（不再 continue-on-error 吞错误）
+      - name: 安装引擎
         run: |
-          # 本仓库即 pr-agent 引擎（fork）：装环境 → 分片跑
-          pip install uv 2>/dev/null || true
-          uv venv .venv --python 3.12 && uv pip install -e . --python .venv/bin/python
-          export PR_AGENT_BIN="$PWD/.venv/bin/pr-agent"
-          export FINDINGS_OUT="$PWD/chunk-engine.json"
-          python3 scripts/chunk_review.py --diff pr.diff \
-            --out findings.json --config config/pipeline.json --max-chunk-tokens 7000
+          pip install uv
+          uv venv .venv --python 3.12
+          uv pip install -e . --python .venv/bin/python
 
-      # ---- Stage 2b：常规 PR 走托管 Action（单遍可完整覆盖）----
-      - name: PR-Agent 初审（MiniMax-M3，OpenAI 兼容通道）
-        if: steps.size.outputs.oversize != 'yes'
-        uses: Codium-ai/pr-agent@e13da4fdda9903c8c7d1c9ba22f671b43f56039b  # main
-        # 传参方式经源码核实（github_action_runner.py + dynaconf env_loader）：
-        # GITHUB_TOKEN/OPENAI_KEY 走 env；其余配置用点分环境变量覆盖
+      - name: 初审（分片审查，全量覆盖）
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OPENAI_KEY: ${{ secrets.MINIMAX_KEY }}
-          OPENAI.API_BASE: https://api.minimaxi.com/v1
-          CONFIG.MODEL: openai/MiniMax-M3
+          # 模型配置：改这三个变量换模型
+          MODEL_KEY: ${{ secrets.MODEL_KEY }}
+          MODEL_BASE: ${{ vars.MODEL_BASE || 'https://api.minimaxi.com/v1' }}
+          MODEL_NAME: ${{ vars.MODEL_NAME || 'openai/MiniMax-M3' }}
+          PR_REVIEWER.FINDINGS_OUTPUT_FILE: ci-findings.json
+          PR_REVIEWER.FINDINGS_OUTPUT_ROOT: ${{ github.workspace }}
           CONFIG.CUSTOM_MODEL_MAX_TOKENS: "16000"
-          GITHUB_ACTION_CONFIG.AUTO_REVIEW: "true"
-          GITHUB_ACTION_CONFIG.AUTO_DESCRIBE: "false"
-          GITHUB_ACTION_CONFIG.AUTO_IMPROVE: "false"
-          # synchronize（新推送）默认不跑命令，显式开启并只跑 /review
-          GITHUB_ACTION_CONFIG.HANDLE_PUSH_TRIGGER: "true"
-          GITHUB_ACTION_CONFIG.PUSH_COMMANDS: '["/review"]'
-        continue-on-error: true   # 初审失败不阻断（分诊层会给出空结果兜底）
+          PR_AGENT_BIN: ${{ github.workspace }}/.venv/bin/pr-agent
+          FINDINGS_OUT: ${{ github.workspace }}/ci-findings.json
+        run: |
+          export OPENAI_KEY="$MODEL_KEY"
+          export OPENAI.API_BASE="$MODEL_BASE"
+          export CONFIG.MODEL="$MODEL_NAME"
+          python3 scripts/chunk_review.py \
+            --diff pr.diff \
+            --out findings.json \
+            --config config/pipeline.json \
+            --max-chunk-tokens 7000
 
-      - name: 等待初审评论落盘
-        if: steps.size.outputs.oversize != 'yes'
-        run: sleep 150   # MiniMax 推理 2-3 分钟，等 review 评论发出后再分诊
-
-      # ---- Stage 3：分诊降噪 ----
-      # 分片路径：findings.json（JSON 直出）| 托管路径：从 bot 评论解析 [AI-FINDING]
+      # ---- Stage 3: 分诊降噪（JSON 直入，不走评论解析）----
       - name: 分诊
         env:
           TRIAGE_API_KEY: ${{ secrets.TRIAGE_API_KEY }}
@@ -86,7 +70,6 @@ jobs:
           EXTRA=""
           if [ -z "$TRIAGE_API_KEY" ]; then EXTRA="--dry-run"; fi
           if [ -f findings.json ]; then
-            echo "[triage] 数据通道：JSON 直出（分片初审）"
             python3 scripts/triage.py \
               --findings findings.json \
               --diff pr.diff \
@@ -94,24 +77,17 @@ jobs:
               --config config/pipeline.json \
               --out triaged.json $EXTRA
           else
-            echo "[triage] 数据通道：评论解析（托管初审）"
-            python3 scripts/triage.py \
-              --pr "${{ github.event.pull_request.html_url }}" \
-              --ledger config/noise_ledger.json \
-              --config config/pipeline.json \
-              --out triaged.json $EXTRA
+            echo '{"mode":"empty","findings":[],"archived":[],"summary":"初审引擎无产出"}' > triaged.json
           fi
 
-      # ---- Q3 爆炸半径检测（输出 escalate 信号，供人工/后续步骤决定升级）----
+      # ---- Q3: 爆炸半径检测 ----
       - name: 爆炸半径检测
         run: |
-          git fetch origin ${{ github.base_ref }} --depth=1
-          git diff origin/${{ github.base_ref }}...HEAD > pr.diff
           python3 scripts/blast_radius.py --diff pr.diff --repo . \
             --config config/pipeline.json > blast_radius.json || true
           cat blast_radius.json
 
-      # ---- Stage 4：分级动作（critical -> status failure 阻断；其余蒸馏评论）----
+      # ---- Stage 4: 分级动作（critical → status failure 阻断）----
       - name: 分级动作
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -123,11 +99,19 @@ jobs:
             --pr "${{ github.event.pull_request.number }}" \
             --sha "${{ github.event.pull_request.head.sha }}"
 
-  # ---- Stage 5（条件触发）：关键路径对抗深度审查 ----
-  # blast_radius.escalate=true 或打 deep-review 标签时，用 harness agent 跑多 persona 对抗审查。
-  # 参考实现（Claude Code headless）：
-  #   claude -p "$(cat config/adversarial_prompt.txt)" --allowedTools Read,Grep,Bash > adversarial.md
-  # 本模板留作接入点，按团队选用的 harness（Claude Code/OpenCode/dsh）填充。
+      # ---- 产物归档 ----
+      - name: 归档
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: review-artifacts
+          path: |
+            findings.json
+            triaged.json
+            blast_radius.json
+          if-no-files-found: ignore
+
+  # ---- Stage 5（条件触发）：对抗深度审查 ----
   deep-review:
     if: contains(github.event.pull_request.labels.*.name, 'deep-review')
     runs-on: ubuntu-latest
