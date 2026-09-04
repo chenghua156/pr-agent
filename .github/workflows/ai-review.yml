@@ -64,6 +64,16 @@ jobs:
           findings_output_root = "${PWD}"
           num_max_findings = 8
           TOML
+          echo "── .secrets.toml 内容（密钥脱敏）──"
+          sed 's/key = ".*/key = "***REDACTED***"/' pr_agent/settings/.secrets.toml
+          echo "── 引擎冒烟测试 ──"
+          .venv/bin/python -c "
+from pr_agent.config_loader import get_settings
+s = get_settings()
+print('model:', s.config.model)
+print('api_base:', s.openai.api_base)
+print('✅ Dynaconf 读取正常')
+" 2>&1 || echo "❌ Dynaconf 读取失败"
           export FINDINGS_OUT="$PWD/ci-findings.json"
           python3 scripts/chunk_review.py \
             --diff pr.diff \
