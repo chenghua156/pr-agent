@@ -40,14 +40,13 @@ jobs:
           uv venv .venv --python 3.12
           uv pip install -e . --python .venv/bin/python
 
-      - name: 初审（分片审查，全量覆盖）
+      - name: 初审（直调引擎，简化排查）
         env:
           M_KEY: ${{ secrets.MINIMAX_KEY }}
           M_BASE: ${{ vars.MODEL_BASE || 'https://api.minimaxi.com/v1' }}
           M_NAME: ${{ vars.MODEL_NAME || 'openai/MiniMax-M3' }}
-          PR_AGENT_BIN: ${{ github.workspace }}/.venv/bin/pr-agent
         run: |
-          # 写入 .secrets.toml（格式与本地部署完全一致，经 Dynaconf 验证）
+          # 1) 写 .secrets.toml（本地验证过的格式）
           cat > pr_agent/settings/.secrets.toml <<TOML
           [config]
           model = "${M_NAME}"
@@ -64,22 +63,34 @@ jobs:
           findings_output_root = "${PWD}"
           num_max_findings = 8
           TOML
-          echo "── .secrets.toml 内容（密钥脱敏）──"
-          sed 's/key = ".*/key = "***REDACTED***"/' pr_agent/settings/.secrets.toml
-          echo "── 引擎冒烟测试 ──"
+
+          # 2) 打印实际写入的文件（密钥脱敏）
+          echo "── .secrets.toml 内容 ──"
+          sed 's/key = ".*/key = "***"/' pr_agent/settings/.secrets.toml
+
+          # 3) Dynaconf 冒烟：引擎自己能不能读到
+          echo "── Dynaconf 冒烟 ──"
           .venv/bin/python -c "
-from pr_agent.config_loader import get_settings
-s = get_settings()
-print('model:', s.config.model)
-print('api_base:', s.openai.api_base)
-print('✅ Dynaconf 读取正常')
-" 2>&1 || echo "❌ Dynaconf 读取失败"
-          export FINDINGS_OUT="$PWD/ci-findings.json"
-          python3 scripts/chunk_review.py \
-            --diff pr.diff \
-            --out findings.json \
-            --config config/pipeline.json \
-            --max-chunk-tokens 7000
+          from pr_agent.config_loader import get_settings
+          s = get_settings()
+          print('model:', s.config.model)
+          print('api_base:', s.openai.api_base)
+          print('key_len:', len(s.openai.key) if s.openai.key else 0)
+          " 2>&1
+
+          # 4) 直接调引擎（不走 chunk_review 的 subprocess 包装）
+          echo "── 直调引擎 ──"
+          .venv/bin/pr-agent --diff-file pr.diff review 2>&1 | tail -20
+
+          # 5) 检查 findings 是否产出
+          if [ -f ci-findings.json ]; then
+            echo "── findings 产出 ──"
+            python3 -c "import json; d=json.load(open('ci-findings.json')); print('findings:', len(d.get('findings',[])))"
+            cp ci-findings.json findings.json
+          else
+            echo "⚠️ 引擎未产出 findings.json"
+            echo '{"source":"pr-agent","findings":[],"run":{}}' > findings.json
+          fi
           rm -f pr_agent/settings/.secrets.toml
 
       # ---- Stage 3: 分诊降噪（JSON 直入，不走评论解析）----
